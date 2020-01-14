@@ -88,6 +88,8 @@ class Support
 	    $this->_imapRessource = imap_open($server, $user, $pass, NULL, 3, array('DISABLE_AUTHENTICATOR' => 'GSSAPI')) or die("can't connect: " . imap_last_error());
 	    imap_expunge($this->_imapRessource);
 	    $this->_mailBoxes = imap_list($this->_imapRessource, $server, '*');
+	    //var_dump($this->_mailBoxes);
+	    //var_dump($this->_server.$this->_config['SUPPORT']['onError']);
 	    $this->parseTicket();
 	}
 
@@ -311,8 +313,14 @@ class Support
 
 	private function errorMessage($msgNumber)
 	{
-		echo "Message incorrect a supprimer \n";
-		imap_delete($this->_imapRessource , $msgNumber);
+		var_dump($this->_mailBoxes);
+		if (!in_array($this->_config['SUPPORT']['onError'], $this->_mailBoxes)) {
+			echo "Création du dossier  : ".$this->_config['SUPPORT']['onError']." \n";
+			imap_createmailbox($this->_imapRessource, $this->_server.$this->_config['SUPPORT']['onError']);
+		}
+		
+		echo "Message incorrect a déplacer vers : ".$this->_config['SUPPORT']['onError']." \n";
+		imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" ,$this->_config['SUPPORT']['onError']);
 	}
 
 	private function forwardToTicket($from, $ticketNumber, $msgNumber, $textMessage)
@@ -320,9 +328,10 @@ class Support
 		echo "Message a transférer au destinataire du ticket $ticketNumber \n";
 		$from = mailparse_rfc822_parse_addresses($from);
 		$exist = 0;
-		var_dump($from[0]);
-		$textMessage = '<b>'.$from[0]['display'].' : </b><br><br>'.$textMessage.$this->_config['SUPPORT']['footerMessage'];
-		var_dump($this->_ticket[$ticketNumber]['email']);
+		$ticketEndMail = str_replace('@', "+CLORE-$ticketNumber@", $this->_config['SUPPORT']['email']);
+		$footer = $this->getTemplate('footerMessage', ['TICKETCLOTUREADDRESS' => $ticketEndMail]);
+		$textMessage = '<b>'.$from[0]['display'].' : </b><br><br>'.$textMessage.$footer;
+		
 		if (in_array($from[0]['address'], $this->_ticket[$ticketNumber]['email']) || $from[0]['address'] == $this->_config['SUPPORT']['sendAdmin']) {
 			$exist = 1;
 			$send = 0;
@@ -364,6 +373,7 @@ class Support
 			imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , $this->_ticket[$ticketNumber]['mailboxe']);
 			imap_renamemailbox ($this->_imapRessource , $this->_server.$this->_ticket[$ticketNumber]['mailboxe'], $this->_server.str_replace('TICKET/', 'TICKET/CLOS-', $this->_ticket[$ticketNumber]['mailboxe']));
 		}
+
 		if ($exist == 0) {
 			imap_delete($this->_imapRessource , $msgNumber);
 		}
@@ -371,6 +381,20 @@ class Support
 	}
 
 	private function getTemplate($template, $data)
+	{
+		$templateTxt = "UNKNOW TEMPLATE";
+		if (isset($this->_config['SUPPORT'][$template])) {
+			$templateTxt = $this->_config['SUPPORT'][$template];
+		}
+		foreach ($data as $key => $value) {
+			$templateTxt = str_replace("{".$key."}", $value, $templateTxt);
+		}
+
+		return $templateTxt;
+
+	}
+
+	public function clean($message)
 	{
 
 	}

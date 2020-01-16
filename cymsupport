@@ -313,7 +313,7 @@ class Support
 
 	private function errorMessage($msgNumber)
 	{
-		var_dump($this->_mailBoxes);
+		//var_dump($this->_mailBoxes);
 		if (!in_array($this->_config['SUPPORT']['onError'], $this->_mailBoxes)) {
 			echo "Création du dossier  : ".$this->_config['SUPPORT']['onError']." \n";
 			imap_createmailbox($this->_imapRessource, $this->_server.$this->_config['SUPPORT']['onError']);
@@ -425,35 +425,45 @@ class Support
 
 
 if (!isset($argv[1])) {
-  echo "Usage : cymSupport [account] [command]\n";
-  exit();
-}
+  $iniFile = scandir('./');
+  foreach ($iniFile as $key => $value) {
+  	if (substr($value, -4) == '.ini') {
+  		echo "Fichier de configuration : $value\n";
+  		$accountConfig = parse_ini_file ($value,TRUE);
+  		$support = new Support($accountConfig['IMAP']['server'], $accountConfig['IMAP']['user'], $accountConfig['IMAP']['password'], $accountConfig);
+  		$support->cron();
+  	}
+  }
 
-$iniFile = $argv[1].'.ini';
-$accountConfig = parse_ini_file ($iniFile,TRUE);
-$retry = 0;
-$state = false;
-
-$support = new Support($accountConfig['IMAP']['server'], $accountConfig['IMAP']['user'], $accountConfig['IMAP']['password'], $accountConfig);
-if (!isset($argv[2])) {
-	$support->cron();
 } else {
-	switch ($argv[2]) {
-		case 'cron':
-			$support->cron();
-			break;
-		
-		case 'help':
-			$support->dispHelp();
-			break;
+	$iniFile = $argv[1].'.ini';
+	$accountConfig = parse_ini_file ($iniFile,TRUE);
+	$retry = 0;
+	$state = false;
 
-		case 'list':
-			$support->dispTicket();
-			break;
-		
-		default:
-			echo "Usage : cymSupport [account] [command]\n";
-			break;
+	$support = new Support($accountConfig['IMAP']['server'], $accountConfig['IMAP']['user'], $accountConfig['IMAP']['password'], $accountConfig);
+	if (!isset($argv[2])) {
+		$support->cron();
+	} else {
+		switch ($argv[2]) {
+			case 'cron':
+				$support->cron();
+				break;
+			
+			case 'help':
+				$support->dispHelp();
+				break;
+
+			case 'list':
+				$support->dispTicket();
+				break;
+			
+			default:
+				echo "Usage : cymSupport [account] [command]\n";
+				break;
+		}
 	}
 }
+
+
 

@@ -93,7 +93,7 @@ class Support
 	    $this->parseTicket();
 
 	    var_dump($this->_ticket);
-	    //exit();
+	    exit();
 	}
 
 	function __destruct()
@@ -402,7 +402,7 @@ class Support
 			if ($this->_config['SUPPORT']['includeAllMessage'] == 1) {
 				$message .= '<hr>'.$textMessage;
 			}
-			
+
 			$this->sendMail($ticketAddress, $fromEmail[0]['address'], "[TICKET#$ticketNumber] $subject", $message);
 			imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , 'TICKET'.$this->_config['IMAP']['hierarchySeparator'].$ticketMailBoxe);
 			if (isset($this->_config['SUPPORT']['sendAdmin'])) {
@@ -533,7 +533,7 @@ if (!isset($argv[1])) {
   	if (substr($value, -4) == '.ini') {
   		echo "Fichier de configuration : $value\n";
   		$accountConfig = parse_ini_file ($value,TRUE);
-  		$support = new Support($accountConfig['IMAP']['server'], $accountConfig['IMAP']['user'], $accountConfig['IMAP']['password'], $accountConfig);
+  		$support = new Support($accountConfig);
   		$support->cron();
   	}
   }

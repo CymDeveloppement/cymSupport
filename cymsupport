@@ -92,8 +92,7 @@ class Support
 		$this->getMailBoxes();
 	    $this->parseTicket();
 
-	    var_dump($this->_ticket);
-	    exit();
+	    //var_dump($this->_ticket);
 	}
 
 	function __destruct()

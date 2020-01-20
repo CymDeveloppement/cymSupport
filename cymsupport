@@ -78,30 +78,64 @@ class Support
 	private $_baseTo;
 	private $_config;
 	private $_ticket;
-	function __construct($server, $user, $pass, $config)
+	private $_hS;
+	private $_bBox;
+	private $_INBOX;
+	private const ALTERNATIVE_HS_CHAR = '='; 
+
+	function __construct($config)
 	{
-		logToFile::$_folderSave = "./$user";
+		
+
 		$this->_config = $config;
-	    $this->_server = $server;
-	    $this->_user = $user;
-	    $this->_baseTo = explode('@', $user)[0].'+';
-	    $this->_imapRessource = imap_open($server, $user, $pass, NULL, 3, array('DISABLE_AUTHENTICATOR' => 'GSSAPI')) or die("can't connect: " . imap_last_error());
-	    imap_expunge($this->_imapRessource);
-	    $this->_mailBoxes = imap_list($this->_imapRessource, $server, '*');
-	    //var_dump($this->_mailBoxes);
-	    //var_dump($this->_server.$this->_config['SUPPORT']['onError']);
+		$this->makeConfig();
+		$this->getMailBoxes();
 	    $this->parseTicket();
+
+	    var_dump($this->_ticket);
+	    //exit();
 	}
 
 	function __destruct()
-	  {
+	{
 	  	imap_expunge($this->_imapRessource);
-	    imap_errors(); 
+	    var_dump(imap_errors()); 
 	    imap_close($this->_imapRessource, CL_EXPUNGE);
-	  }
+	}
+
+	private function makeConfig()
+	{
+		$this->_server = $this->_config['IMAP']['server'];
+	    $this->_user = $this->_config['IMAP']['user'];
+	    $this->_baseTo = explode('@', $this->_user)[0].'+';
+	    $this->_hS = $this->_config['IMAP']['hierarchySeparator'];
+	    $this->_bBox = $this->_config['IMAP']['baseBox'];
+	    $this->_INBOX = $this->_server.$this->_bBox;
+
+	    $this->_imapRessource = imap_open(
+	    			$this->_server, 
+	    			$this->_user, 
+	    			$this->_config['IMAP']['password'], 
+	    			NULL, 
+	    			3, 
+	    			array('DISABLE_AUTHENTICATOR' => 'GSSAPI')
+	    		) or die("can't connect: " . imap_last_error());
+
+	    $this->_server .= $this->_bBox.$this->_hS;
+
+	   	logToFile::$_folderSave = "./".$this->_config['IMAP']['server'];
+	   	imap_expunge($this->_imapRessource);
+	}
+
+	private function getMailBoxes()
+	{
+		$this->_mailBoxes = imap_list($this->_imapRessource, $this->_server, '*');
+		var_dump($this->_mailBoxes);
+	}
 
 	private function sendMail($from, $to, $subject, $textMessage)
 	{
+		//exit();
 		$mail = new PHPMailer(true);
 		$mail->CharSet = 'UTF-8';
 		try {
@@ -117,7 +151,15 @@ class Support
 
 		    //Recipients
 		    $mail->setFrom($this->_config['SUPPORT']['email'], $this->_config['SUPPORT']['senderName']);
-		    $mail->addAddress($to);               // Name is optional
+		    if (is_array($to)) {
+		    	foreach ($to as $key => $value) {
+		    		$mail->addAddress($value);
+		    	}
+		    } else {
+		    	$mail->addAddress($to);
+		    }
+		                   // Name is optional
+		    
 		    $mail->addReplyTo($from, $this->_config['SUPPORT']['senderName']);
 
 		    // Content
@@ -136,20 +178,24 @@ class Support
 	private function parseTicket()
 	{
 		$ticketFolderExist = false;
+
 	    foreach ($this->_mailBoxes as $key => $mailBoxe) {
 	    	$this->_mailBoxes[$key] = str_replace($this->_server, '', $mailBoxe);
 	    	if ($this->_mailBoxes[$key] == 'TICKET') {
 	    		$ticketFolderExist = true;
 	    	}
 	    }
+
 	    if (!$ticketFolderExist) {
-	    	imap_createmailbox($this->_imapRessource, $this->_server.'TICKET');
+	    	imap_createmailbox($this->_imapRessource, $this->_server.'TICKET');	    	
 	    }
+
 		echo "Récupération des ticket existant \n";
+
 		$ticket = array();
 		foreach ($this->_mailBoxes as $mailBoxe) {
-			if (substr($mailBoxe, 0, 7) == 'TICKET/') {
-				$ticketArray = explode('/', $mailBoxe);
+			if (substr($mailBoxe, 0, 7) == 'TICKET'.$this->_hS) {
+				$ticketArray = explode($this->_hS, $mailBoxe);
 				$ticketData = explode('_', $ticketArray[1]);
 				if (substr($ticketData[0], 0, 5) == 'CLOS-') {
 					$ticketNumber = intval(str_replace('CLOS-', '', $ticketData[0]));
@@ -166,11 +212,11 @@ class Support
 					$ticket[$ticketNumber] = ['email' => array(), 'subject' => $ticketData[1], 'mailboxe' => $mailBoxe, 'state' => $ticketState];
 					
 					if (count($ticketArray) > 2) {
-						$ticket[$ticketNumber]['email'][] = $ticketArray[2];
+						$ticket[$ticketNumber]['email'][] = str_replace($this::ALTERNATIVE_HS_CHAR, $this->_hS, $ticketArray[2]);
 					}
 				} else {
 					if (count($ticketArray) > 2) {
-						$ticket[$ticketNumber]['email'][] = $ticketArray[2];
+						$ticket[$ticketNumber]['email'][] = str_replace($this::ALTERNATIVE_HS_CHAR, $this->_hS, $ticketArray[2]);
 					}
 				}
 			}
@@ -181,10 +227,12 @@ class Support
 	private function getNewMail()
 	{
 		echo "Lecture des nouveaux e-mail \n";
-		imap_reopen($this->_imapRessource, $this->_server.'INBOX');
+		imap_reopen($this->_imapRessource, $this->_INBOX);
+
 		$count = imap_num_msg($this->_imapRessource);
     	logToFile::logToCli("$count message a traité.");
     	$uids = imap_search($this->_imapRessource, 'ALL', SE_UID, "UTF-8");
+    	
     	if (!$uids) return;
     	foreach ($uids as $ud) {
     		$k = imap_msgno ($this->_imapRessource, $ud);  
@@ -198,38 +246,43 @@ class Support
 		    $subject = $Parser->getHeader('Subject');
 		    $action = 0;
 		    $ticketNumber = 0;
-		    if (is_array($mailArray['to']) && count($mailArray['to'])) {
+		    if (is_array($mailArray['to']) && count($mailArray['to']) > 0) {
 		    	foreach ($mailArray['to'] as $mailTo) {
 		    		$supportDomain = explode('@', $this->_config['SUPPORT']['email'])[1];
 		    		$supportUser = explode('@', $this->_config['SUPPORT']['email'])[0];
 		    		$mailToDomain = explode('@', $mailTo['address'])[1];
 		    		$mailToUser = explode('@', $mailTo['address'])[0];
 
-		    		if ($mailTo['address'] == $this->_config['SUPPORT']['email']) {
+		    		$ticketNumber = $this->isExistingTicket($mailTo['address'], $subject);
+		    		
+
+		    		if ($ticketNumber === false && $mailTo['address'] == $this->_config['SUPPORT']['email']) {
 		    			// new ticket
 		    			if ($action == 0) {
 		    				$action = 1;
 		    			}
-		    		} elseif ($supportDomain == $mailToDomain) {
-		    			$mailToUserBase = explode('+', $mailToUser);
-		    			if (strtolower($mailToUserBase[0]) == strtolower($supportUser)) {
-		    				if (isset($this->_ticket[$mailToUserBase[1]]) && $this->_ticket[$mailToUserBase[1]]['state'] == 'OPEN') {
-		    					$ticketNumber = $mailToUserBase[1];
-
-		    					if (isset($this->_config['SUPPORT']['sendAdmin']) && $this->_config['SUPPORT']['sendAdmin'] == mailparse_rfc822_parse_addresses($mailArray['from'])[0]['address'] && count($mailArray['to']) > 1) {
-		    						$action = 3;
-		    						//var_dump($mailArray['to']);
-		    					} else {
-		    						$action = 2;
-		    					}
-		    				} elseif (substr($mailToUserBase[1], 0, 6) == 'CLORE-' && isset($this->_ticket[substr($mailToUserBase[1], 6)])) {
-		    					$ticketNumber = substr($mailToUserBase[1], 6);
-		    					$action = 4;
+		    		} elseif ($supportDomain == $mailToDomain && is_int($ticketNumber) && $ticketNumber !== false) 
+		    		{
+		    			if (isset($this->_ticket[$ticketNumber]) && $this->_ticket[$ticketNumber]['state'] == 'OPEN')
+		    			{
+		    				if (isset($this->_config['SUPPORT']['sendAdmin']) 
+		    						&& in_array(
+		    							mailparse_rfc822_parse_addresses($mailArray['from'])[0]['address'],
+		    							$this->_config['SUPPORT']['sendAdmin'])
+		    						&& count($mailArray['to']) > 1) {
+		    					$action = 3;
+		    					//var_dump($mailArray['to']);
+		    				} else {
+		    					$action = 2;
 		    				}
+		    			} elseif(isset($this->_ticket[$ticketNumber]) && $this->_ticket[$ticketNumber]['state'] !== 'OPEN') {
+		    				$action = 4;
 		    			}
+		    			
 		    		}
 		    	}
 		    }
+
 		    echo "$k : ";
 		    switch ($action) {
 		    	case 0:
@@ -266,8 +319,46 @@ class Support
 		return $max+1;
 	}
 
+	private function getTicketAddress($ticketNumber)
+	{
+		if ($this->_config['SUPPORT']['filterBy'] == 'address') {
+			return str_replace('@', "+$ticketNumber@", $this->_config['SUPPORT']['email']);
+		} else {
+			return $this->_config['SUPPORT']['email'];
+		}
+	}
+
+	private function isExistingTicket($dest, $subject)
+	{
+		$supportDomain = explode('@', $this->_config['SUPPORT']['email'])[1];
+		$supportUser = explode('@', $this->_config['SUPPORT']['email'])[0];
+		$mailToDomain = explode('@', $dest)[1];
+		$mailToUser = explode('@', $dest)[0];
+
+		if ($this->_config['SUPPORT']['filterBy'] == 'address') {
+			if ($mailTo['address'] == $this->_config['SUPPORT']['email']) {
+				return false;
+			} elseif ($supportDomain == $mailToDomain) {
+		    	$mailToUserBase = explode('+', $mailToUser);
+		    	if (strtolower($mailToUserBase[0]) == strtolower($supportUser)) {
+		    		if (isset($this->_ticket[$mailToUserBase[1]])) return $mailToUserBase[1];
+		    	}
+		    }
+		} else {
+			if (strpos($subject, "[TICKET#") === false) {
+				return false;
+			} else {
+				$ticketNumber = intval(explode(']', explode('[TICKET#', ' '.$subject)[1])[0]);
+				if (isset($this->_ticket[$ticketNumber])) return $ticketNumber;
+			}
+		}
+
+		return false;
+	}
+
 	private function createMailBoxName($text)
 	{
+		$text = str_replace($this->_hS, $this::ALTERNATIVE_HS_CHAR, $text);
 		$encoding = mb_detect_encoding($text);
 		return mb_convert_encoding($text,"UTF7-IMAP",$encoding);
 	}
@@ -279,7 +370,8 @@ class Support
 		$ticketAddress = explode('@', $this->_config['SUPPORT']['email'])[0].'+'.$ticketNumber.'@'.explode('@', $this->_config['SUPPORT']['email'])[1];
 		foreach ($toArray as $key => $value) {
 			if ($value['address'] != $ticketAddress && !in_array($value['address'], $this->_ticket[$ticketNumber]['email'])) {
-				imap_createmailbox($this->_imapRessource, $this->_server.$this->_ticket[$ticketNumber]['mailboxe'].'/'.$value['address']);
+				$value['address'] = createMailBoxName($value['address']);
+				imap_createmailbox($this->_imapRessource, $this->_server.$this->_ticket[$ticketNumber]['mailboxe'].$this->_config['IMAP']['hierarchySeparator'].$value['address']);
 			}
 		}
 		imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , $this->_ticket[$ticketNumber]['mailboxe']);
@@ -295,17 +387,27 @@ class Support
 		$fromEmail = mailparse_rfc822_parse_addresses($from);
 		if (count($fromEmail) > 0 && isset($fromEmail[0]['address'])) {
 			echo "nouveau ticket : $ticketNumber \n";
-			imap_createmailbox($this->_imapRessource, $this->_server.'TICKET/'.$ticketMailBoxe);
-			imap_createmailbox($this->_imapRessource, $this->_server.'TICKET/'.$ticketMailBoxe.'/'.$fromEmail[0]['address']);
-			$ticketAddress = explode('@', $this->_config['SUPPORT']['email'])[0].'+'.$ticketNumber.'@'.explode('@', $this->_config['SUPPORT']['email'])[1];
-			$message = str_replace('{TICKETNUMBER}', $ticketNumber, $this->_config['SUPPORT']['newTicketMessage']).'<hr>'.$textMessage;
+			imap_createmailbox($this->_imapRessource, $this->_server.'TICKET'.$this->_config['IMAP']['hierarchySeparator'].$ticketMailBoxe);
+			$destAdress = $this->createMailBoxName($fromEmail[0]['address']);
+			imap_createmailbox($this->_imapRessource, $this->_server.'TICKET'.$this->_config['IMAP']['hierarchySeparator'].$ticketMailBoxe.$this->_config['IMAP']['hierarchySeparator'].$destAdress);
+			
+			echo $this->_server.'TICKET'.$this->_config['IMAP']['hierarchySeparator'].$ticketMailBoxe." \n";
+
+
+			$ticketAddress = $this->getTicketAddress($ticketNumber);
+
+			$message = str_replace('{TICKETNUMBER}', $ticketNumber, $this->_config['SUPPORT']['newTicketMessage']);
 			$message = str_replace('{TICKETADDRESS}', $ticketAddress, $message);
-			$ticketEmail = str_replace('@', "+$ticketNumber@", $this->_config['SUPPORT']['email']);
-			$this->sendMail($ticketEmail, $fromEmail[0]['address'], "[TICKET#$ticketNumber] $subject", $message);
-			imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , 'TICKET/'.$ticketMailBoxe);
+			
+			if ($this->_config['SUPPORT']['includeAllMessage'] == 1) {
+				$message .= '<hr>'.$textMessage;
+			}
+			
+			$this->sendMail($ticketAddress, $fromEmail[0]['address'], "[TICKET#$ticketNumber] $subject", $message);
+			imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , 'TICKET'.$this->_config['IMAP']['hierarchySeparator'].$ticketMailBoxe);
 			if (isset($this->_config['SUPPORT']['sendAdmin'])) {
 				$adminMessage = str_replace('{TICKETNUMBER}', $ticketNumber, $this->_config['SUPPORT']['newTicketAdminMessage']).'<hr>'.$textMessage;
-				$this->sendMail($ticketEmail, $this->_config['SUPPORT']['sendAdmin'], "[TICKET#$ticketNumber] $subject", $adminMessage);
+				$this->sendMail($ticketAddress, $this->_config['SUPPORT']['sendAdmin'], "[TICKET#$ticketNumber] $subject", $adminMessage);
 			}
 		}
 		
@@ -332,7 +434,8 @@ class Support
 		$footer = $this->getTemplate('footerMessage', ['TICKETCLOTUREADDRESS' => $ticketEndMail]);
 		$textMessage = '<b>'.$from[0]['display'].' : </b><br><br>'.$textMessage.$footer;
 		
-		if (in_array($from[0]['address'], $this->_ticket[$ticketNumber]['email']) || $from[0]['address'] == $this->_config['SUPPORT']['sendAdmin']) {
+		if (in_array($from[0]['address'], $this->_ticket[$ticketNumber]['email']) 
+			|| in_array($from[0]['address'], $this->_config['SUPPORT']['sendAdmin'])) {
 			$exist = 1;
 			$send = 0;
 			$fromEmail = explode('@', $this->_config['SUPPORT']['email'])[0].'+'.$ticketNumber.'@'.explode('@', $this->_config['SUPPORT']['email'])[1];
@@ -346,7 +449,7 @@ class Support
 			}
 			if ($send == 0) {
 				$destEmail = $this->_config['SUPPORT']['sendAdmin'];
-				echo "\ttransfert vers administrateur : $destEmail \n";
+				echo "\ttransfert vers administrateur : Admin \n";
 				$this->sendMail($fromEmail, $destEmail, "[TICKET#$ticketNumber] $subject", $textMessage);
 			}
 			imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , $this->_ticket[$ticketNumber]['mailboxe']);
@@ -371,7 +474,7 @@ class Support
 					$this->sendMail($fromEmail, $destEmail, "[TICKET#$ticketNumber] $subject", $textMessage);
 			}
 			imap_mail_move ($this->_imapRessource , "$msgNumber:$msgNumber" , $this->_ticket[$ticketNumber]['mailboxe']);
-			imap_renamemailbox ($this->_imapRessource , $this->_server.$this->_ticket[$ticketNumber]['mailboxe'], $this->_server.str_replace('TICKET/', 'TICKET/CLOS-', $this->_ticket[$ticketNumber]['mailboxe']));
+			imap_renamemailbox ($this->_imapRessource , $this->_server.$this->_ticket[$ticketNumber]['mailboxe'], $this->_server.str_replace('TICKET'.$this->_config['IMAP']['hierarchySeparator'], 'TICKET'.$this->_config['IMAP']['hierarchySeparator'].'CLOS-', $this->_ticket[$ticketNumber]['mailboxe']));
 		}
 
 		if ($exist == 0) {
@@ -441,7 +544,7 @@ if (!isset($argv[1])) {
 	$retry = 0;
 	$state = false;
 
-	$support = new Support($accountConfig['IMAP']['server'], $accountConfig['IMAP']['user'], $accountConfig['IMAP']['password'], $accountConfig);
+	$support = new Support($accountConfig);
 	if (!isset($argv[2])) {
 		$support->cron();
 	} else {
